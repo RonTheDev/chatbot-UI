@@ -16,3 +16,24 @@
 .animate-pulse-glow {
   animation: pulseGlow 1.5s infinite;
 }
+/* index.css */
+@keyframes pulseCircle {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 150, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 30px rgba(0, 255, 150, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 150, 0);
+  }
+}
+
+.voice-pulse-circle {
+  width: 150px;
+  height: 150px;
+  border-radius: 9999px;
+  background-color: #00ff94;
+  animation: pulseCircle 1.5s infinite;
+  opacity: 0.8;
+}
