@@ -1,28 +1,12 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-@keyframes pulseGlow {
-  0% {
-    box-shadow: 0 0 0 0 rgba(72, 187, 120, 0.7);
-  }
-  70% {
-    box-shadow: 0 0 0 15px rgba(72, 187, 120, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(72, 187, 120, 0);
-  }
-}
-
-.animate-pulse-glow {
-  animation: pulseGlow 1.5s infinite;
-}
-/* index.css */
 @keyframes pulseCircle {
   0% {
     box-shadow: 0 0 0 0 rgba(0, 255, 150, 0.7);
   }
   70% {
-    box-shadow: 0 0 0 30px rgba(0, 255, 150, 0);
+    box-shadow: 0 0 0 60px rgba(0, 255, 150, 0);
   }
   100% {
     box-shadow: 0 0 0 0 rgba(0, 255, 150, 0);
@@ -30,10 +14,26 @@
 }
 
 .voice-pulse-circle {
-  width: 150px;
-  height: 150px;
+  width: 160px;
+  height: 160px;
   border-radius: 9999px;
   background-color: #00ff94;
   animation: pulseCircle 1.5s infinite;
-  opacity: 0.8;
+  opacity: 0.85;
+}
+
+@keyframes pulseGlow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 150, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 25px rgba(0, 255, 150, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 150, 0);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 1.8s infinite;
 }
