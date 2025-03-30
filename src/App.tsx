@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import "./index.css";
 
@@ -14,17 +14,18 @@ export default function Chatbot() {
     { sender: "bot", text: "ברוך הבא, איך אפשר לעזור?" },
   ]);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
-  const [isListening, setIsListening] = useState(false);
-
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const startListening = async () => {
+  useEffect(() => {
+    window.speechSynthesis.getVoices(); // preload voices
+  }, []);
+
+  const startVoiceLoop = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -39,36 +40,30 @@ export default function Chatbot() {
         const audioBlob = new Blob(audioChunksRef.current, {
           type: "audio/webm",
         });
-        const formData = new FormData();
-        formData.append("audio", audioBlob, "input.webm");
-
         console.log("🎙️ Sending audio to server...");
+        const formData = new FormData();
+        formData.append("audio", audioBlob, "recording.webm");
 
         try {
-          const response = await fetch(`${FLASK_SERVER_URL}/transcribe`, {
+          const res = await fetch(`${FLASK_SERVER_URL}/transcribe`, {
             method: "POST",
             body: formData,
           });
+          const data = await res.json();
+          if (!data.transcription) throw new Error("No transcription received");
 
-          const result = await response.json();
-          const transcript = result.transcription || "";
-
-          if (!transcript) throw new Error("No transcription received");
-
-          setMessages((prev) => [
-            ...prev,
-            { sender: "user", text: transcript },
-          ]);
+          const userText = data.transcription.trim();
+          setMessages((prev) => [...prev, { sender: "user", text: userText }]);
 
           const ttsRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: transcript }),
+            body: JSON.stringify({ text: userText }),
           });
 
-          const ttsBlob = await ttsRes.blob();
-          const audioUrl = URL.createObjectURL(ttsBlob);
-          const audio = new Audio(audioUrl);
+          const audioData = await ttsRes.blob();
+          const audioURL = URL.createObjectURL(audioData);
+          const audio = new Audio(audioURL);
 
           setMessages((prev) => [
             ...prev,
@@ -77,12 +72,7 @@ export default function Chatbot() {
 
           audio.onended = () => {
             console.log("🔁 Finished speaking, restarting loop");
-            if (isVoiceMode) startListening(); // loop
-          };
-
-          audio.onerror = (e) => {
-            console.error("Audio error", e);
-            if (isVoiceMode) setTimeout(() => startListening(), 1000);
+            if (isVoiceMode) startVoiceLoop();
           };
 
           audio.play();
@@ -90,38 +80,30 @@ export default function Chatbot() {
           console.error("Voice flow error:", err);
           setMessages((prev) => [
             ...prev,
-            { sender: "bot", text: "מצטער, הייתה שגיאה בתהליך השמע." },
+            { sender: "bot", text: "שגיאה בזיהוי קול או השמעה." },
           ]);
-          if (isVoiceMode) setTimeout(() => startListening(), 1000);
+          if (isVoiceMode) setTimeout(startVoiceLoop, 1000);
         }
       };
 
-      setIsListening(true);
       mediaRecorder.start();
-
       setTimeout(() => {
-        if (mediaRecorder.state !== "inactive") {
-          mediaRecorder.stop();
-        }
-      }, 4000); // listen for 4 seconds
+        mediaRecorder.stop();
+      }, 5000); // listen for 5 sec
     } catch (err) {
       console.error("🎤 Mic error:", err);
-      setIsListening(false);
     }
   };
 
-  const handleMicToggle = () => {
+  const toggleVoiceMode = () => {
     const newState = !isVoiceMode;
     setIsVoiceMode(newState);
+    console.log(newState ? "🎤 Voice mode ON" : "❌ Voice mode OFF");
 
     if (newState) {
-      console.log("🎤 Voice mode ON");
-      startListening();
+      startVoiceLoop();
     } else {
-      console.log("❌ Voice mode OFF");
-      mediaRecorderRef.current?.stop();
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      setIsListening(false);
+      streamRef.current?.getTracks().forEach((t) => t.stop());
     }
   };
 
@@ -139,9 +121,9 @@ export default function Chatbot() {
       <div className="w-full max-w-md h-[600px] bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden z-10">
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {!isVoiceMode &&
-            messages.map((msg, index) => (
+            messages.map((msg, i) => (
               <div
-                key={index}
+                key={i}
                 className={`flex items-end ${
                   msg.sender === "user" ? "justify-end" : "justify-start"
                 }`}
@@ -164,7 +146,7 @@ export default function Chatbot() {
       </div>
 
       <button
-        onClick={handleMicToggle}
+        onClick={toggleVoiceMode}
         className={`fixed bottom-8 right-8 w-14 h-14 z-50 rounded-full text-white text-2xl font-bold shadow-lg transition ${
           isVoiceMode
             ? "bg-green-600 animate-pulse-glow"
