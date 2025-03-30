@@ -7,7 +7,7 @@ interface Message {
   text: string;
 }
 
-const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com"; // Replace with your server URL
+const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com"; // Your working server
 
 export default function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([
@@ -16,11 +16,10 @@ export default function Chatbot() {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
-    window.speechSynthesis.getVoices(); // preload voices
+    window.speechSynthesis.getVoices(); // Preload voices
   }, []);
 
   const startListening = () => {
@@ -36,7 +35,6 @@ export default function Chatbot() {
       const transcript = event.results[0][0].transcript;
       console.log("🎙️ User said:", transcript);
 
-      // Add user message to chat
       setMessages((prev) => [...prev, { sender: "user", text: transcript }]);
 
       try {
@@ -46,24 +44,36 @@ export default function Chatbot() {
           body: JSON.stringify({ text: transcript }),
         });
 
+        if (!speakRes.ok) throw new Error("Bad response from server");
+
         const audioBlob = await speakRes.blob();
         const audioUrl = URL.createObjectURL(audioBlob);
-
         const audio = new Audio(audioUrl);
-        audio.play();
 
-        // Add placeholder bot message
+        // Save placeholder message
         setMessages((prev) => [
           ...prev,
           { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
         ]);
 
-        // Auto-restart after speech
         audio.onended = () => {
           if (isVoiceMode) {
-            setTimeout(() => startListening(), 500);
+            setTimeout(() => startListening(), 300); // Auto loop
           }
         };
+
+        audio.onerror = (e) => {
+          console.error("Audio load error:", e);
+          setMessages((prev) => [
+            ...prev,
+            { sender: "bot", text: "מצטער, הייתה שגיאה בהשמעת קול." },
+          ]);
+          if (isVoiceMode) {
+            setTimeout(() => startListening(), 1500);
+          }
+        };
+
+        audio.play();
       } catch (err) {
         console.error("TTS Error:", err);
         setMessages((prev) => [
@@ -83,11 +93,12 @@ export default function Chatbot() {
     };
 
     recognition.onend = () => {
-      setIsListening(false);
+      if (isVoiceMode) {
+        setTimeout(() => startListening(), 400);
+      }
     };
 
     recognitionRef.current = recognition;
-    setIsListening(true);
     recognition.start();
   };
 
@@ -100,7 +111,6 @@ export default function Chatbot() {
     } else {
       recognitionRef.current?.stop();
       window.speechSynthesis.cancel();
-      setIsListening(false);
     }
   };
 
