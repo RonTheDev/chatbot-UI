@@ -18,12 +18,13 @@ export default function Chatbot() {
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    window.speechSynthesis.getVoices();
+    window.speechSynthesis.getVoices(); // preload
   }, []);
 
-  const startListening = () => {
+  const listenAndReply = () => {
     const SpeechRecognition =
       (window as any).webkitSpeechRecognition ||
       (window as any).SpeechRecognition;
@@ -35,52 +36,52 @@ export default function Chatbot() {
     recognition.onresult = async (event: any) => {
       const transcript = event.results[0][0].transcript;
       console.log("🎙️ User said:", transcript);
-
-      // Save user message to messages (transcript will show after voice mode ends)
       setMessages((prev) => [...prev, { sender: "user", text: transcript }]);
 
       try {
-        const speakRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
+        const response = await fetch(`${FLASK_SERVER_URL}/speak`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: transcript }),
         });
 
-        if (!speakRes.ok) throw new Error("TTS Request failed");
+        if (!response.ok) throw new Error("TTS Request failed");
 
-        const audioBlob = await speakRes.blob();
+        const audioBlob = await response.blob();
         const audioUrl = URL.createObjectURL(audioBlob);
+
         const audio = new Audio(audioUrl);
-
-        audio.onended = () => {
-          if (isVoiceMode) {
-            setTimeout(() => startListening(), 500);
-          }
-        };
-
-        audio.onerror = (e) => {
-          console.error("Audio error:", e);
-          if (isVoiceMode) setTimeout(() => startListening(), 1000);
-        };
-
-        audio.play();
+        audioRef.current = audio;
 
         setMessages((prev) => [
           ...prev,
           { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
         ]);
+
+        audio.onended = () => {
+          console.log("🔁 Finished speaking, restarting loop");
+          if (isVoiceMode) setTimeout(() => listenAndReply(), 400);
+        };
+
+        audio.onerror = (err) => {
+          console.error("Audio error", err);
+          if (isVoiceMode) setTimeout(() => listenAndReply(), 1000);
+        };
+
+        audio.play();
       } catch (err) {
         console.error("TTS Error:", err);
         setMessages((prev) => [
           ...prev,
-          { sender: "bot", text: "מצטער, הייתה שגיאה בהשמעת קול." },
+          { sender: "bot", text: "שגיאה בהשמעת קול." },
         ]);
-        if (isVoiceMode) setTimeout(() => startListening(), 1500);
+        if (isVoiceMode) setTimeout(() => listenAndReply(), 1000);
       }
     };
 
-    recognition.onerror = () => {
-      if (isVoiceMode) setTimeout(() => startListening(), 1000);
+    recognition.onerror = (err: any) => {
+      console.error("Recognition error:", err);
+      if (isVoiceMode) setTimeout(() => listenAndReply(), 1000);
     };
 
     recognition.onend = () => setIsListening(false);
@@ -95,10 +96,11 @@ export default function Chatbot() {
     setIsVoiceMode(newState);
 
     if (newState) {
-      startListening();
+      listenAndReply();
     } else {
       recognitionRef.current?.stop();
       window.speechSynthesis.cancel();
+      if (audioRef.current) audioRef.current.pause();
       setIsListening(false);
     }
   };
@@ -125,17 +127,16 @@ export default function Chatbot() {
       dir="rtl"
       className="min-h-screen bg-[#0c0f1a] text-white flex flex-col items-center justify-center p-4 font-sans relative"
     >
-      {/* Voice mode overlay */}
+      {/* Voice Mode Indicator */}
       {isVoiceMode && (
         <div className="absolute inset-0 z-40 flex items-center justify-center">
           <div className="voice-pulse-circle"></div>
         </div>
       )}
 
-      {/* Chat container */}
+      {/* Chat Window */}
       <div className="w-full max-w-md h-[600px] bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden z-10">
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {/* Only show messages after voice mode ends */}
           {!isVoiceMode &&
             messages.map((msg, index) => (
               <div
@@ -164,7 +165,6 @@ export default function Chatbot() {
           )}
         </div>
 
-        {/* Input area */}
         {!isVoiceMode && (
           <div className="p-3 border-t border-gray-700 bg-gray-800 flex items-center gap-2">
             <input
@@ -185,7 +185,7 @@ export default function Chatbot() {
         )}
       </div>
 
-      {/* Mic button */}
+      {/* Mic Button */}
       <button
         onClick={handleMicToggle}
         className={`fixed bottom-8 right-8 w-14 h-14 z-50 rounded-full text-white text-2xl font-bold shadow-lg transition ${
