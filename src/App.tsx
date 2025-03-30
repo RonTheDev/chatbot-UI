@@ -7,6 +7,8 @@ interface Message {
   text: string;
 }
 
+const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com"; // Replace with your server URL
+
 export default function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([
     { sender: "bot", text: "ברוך הבא, איך אפשר לעזור?" },
@@ -21,15 +23,6 @@ export default function Chatbot() {
     window.speechSynthesis.getVoices(); // preload voices
   }, []);
 
-  const speakText = (text: string, onEnd?: () => void) => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "he-IL";
-    const voices = speechSynthesis.getVoices();
-    utterance.voice = voices.find((v) => v.lang === "he-IL") || null;
-    if (onEnd) utterance.onend = onEnd;
-    speechSynthesis.speak(utterance);
-  };
-
   const startListening = () => {
     const SpeechRecognition =
       (window as any).webkitSpeechRecognition ||
@@ -39,16 +32,48 @@ export default function Chatbot() {
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = async (event: any) => {
       const transcript = event.results[0][0].transcript;
       console.log("🎙️ User said:", transcript);
 
-      const botResponse = generateBotResponse(transcript);
-      speakText(botResponse, () => {
+      // Add user message to chat
+      setMessages((prev) => [...prev, { sender: "user", text: transcript }]);
+
+      try {
+        const speakRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: transcript }),
+        });
+
+        const audioBlob = await speakRes.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+
+        const audio = new Audio(audioUrl);
+        audio.play();
+
+        // Add placeholder bot message
+        setMessages((prev) => [
+          ...prev,
+          { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
+        ]);
+
+        // Auto-restart after speech
+        audio.onended = () => {
+          if (isVoiceMode) {
+            setTimeout(() => startListening(), 500);
+          }
+        };
+      } catch (err) {
+        console.error("TTS Error:", err);
+        setMessages((prev) => [
+          ...prev,
+          { sender: "bot", text: "מצטער, הייתה שגיאה בהשמעת קול." },
+        ]);
         if (isVoiceMode) {
-          setTimeout(() => startListening(), 400);
+          setTimeout(() => startListening(), 1500);
         }
-      });
+      }
     };
 
     recognition.onerror = () => {
@@ -77,12 +102,6 @@ export default function Chatbot() {
       window.speechSynthesis.cancel();
       setIsListening(false);
     }
-  };
-
-  const generateBotResponse = (input: string): string => {
-    if (input.includes("מה קורה")) return "הכל מצוין, תודה ששאלת!";
-    if (input.includes("מי אתה")) return "אני הבוט החכם שלך, תמיד כאן בשבילך.";
-    return "הבנתי אותך. בוא נמשיך לדבר.";
   };
 
   const handleSend = () => {
