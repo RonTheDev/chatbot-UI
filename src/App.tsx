@@ -7,7 +7,7 @@ interface Message {
   text: string;
 }
 
-const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com"; // Your working server
+const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com"; // ✅ your Flask URL
 
 export default function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([
@@ -16,10 +16,11 @@ export default function Chatbot() {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
-    window.speechSynthesis.getVoices(); // Preload voices
+    window.speechSynthesis.getVoices(); // preload voices
   }, []);
 
   const startListening = () => {
@@ -35,45 +36,35 @@ export default function Chatbot() {
       const transcript = event.results[0][0].transcript;
       console.log("🎙️ User said:", transcript);
 
+      // ✅ Add user transcript to chat
       setMessages((prev) => [...prev, { sender: "user", text: transcript }]);
 
       try {
-        const speakRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
+        const response = await fetch(`${FLASK_SERVER_URL}/speak`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: transcript }),
         });
 
-        if (!speakRes.ok) throw new Error("Bad response from server");
+        if (!response.ok) throw new Error("TTS Request failed");
 
-        const audioBlob = await speakRes.blob();
-        const audioUrl = URL.createObjectURL(audioBlob);
+        // ✅ Extract audio + bot reply text
+        const blob = await response.blob();
+        const audioUrl = URL.createObjectURL(blob);
+        const botReply = response.headers.get("X-Bot-Reply") || "";
+
         const audio = new Audio(audioUrl);
+        audio.play();
 
-        // Save placeholder message
-        setMessages((prev) => [
-          ...prev,
-          { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
-        ]);
+        // ✅ Add bot reply to chat
+        setMessages((prev) => [...prev, { sender: "bot", text: botReply }]);
 
+        // ✅ Loop after speaking
         audio.onended = () => {
           if (isVoiceMode) {
-            setTimeout(() => startListening(), 300); // Auto loop
+            setTimeout(() => startListening(), 300);
           }
         };
-
-        audio.onerror = (e) => {
-          console.error("Audio load error:", e);
-          setMessages((prev) => [
-            ...prev,
-            { sender: "bot", text: "מצטער, הייתה שגיאה בהשמעת קול." },
-          ]);
-          if (isVoiceMode) {
-            setTimeout(() => startListening(), 1500);
-          }
-        };
-
-        audio.play();
       } catch (err) {
         console.error("TTS Error:", err);
         setMessages((prev) => [
@@ -93,12 +84,11 @@ export default function Chatbot() {
     };
 
     recognition.onend = () => {
-      if (isVoiceMode) {
-        setTimeout(() => startListening(), 400);
-      }
+      setIsListening(false);
     };
 
     recognitionRef.current = recognition;
+    setIsListening(true);
     recognition.start();
   };
 
@@ -111,6 +101,7 @@ export default function Chatbot() {
     } else {
       recognitionRef.current?.stop();
       window.speechSynthesis.cancel();
+      setIsListening(false);
     }
   };
 
@@ -136,16 +127,15 @@ export default function Chatbot() {
       dir="rtl"
       className="min-h-screen bg-[#0c0f1a] text-white flex flex-col items-center justify-center p-4 font-sans relative"
     >
-      {/* Glow overlay for voice mode */}
+      {/* 🔊 Glow Overlay in Voice Mode */}
       {isVoiceMode && (
         <div className="absolute inset-0 z-40 flex items-center justify-center">
           <div className="voice-pulse-circle"></div>
         </div>
       )}
 
-      {/* Chat UI container */}
+      {/* 💬 Chat Container */}
       <div className="w-full max-w-md h-[600px] bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden z-10">
-        {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {!isVoiceMode &&
             messages.map((msg, index) => (
@@ -175,7 +165,7 @@ export default function Chatbot() {
           )}
         </div>
 
-        {/* Input + Buttons */}
+        {/* ✏️ Text Input */}
         {!isVoiceMode && (
           <div className="p-3 border-t border-gray-700 bg-gray-800 flex items-center gap-2">
             <input
@@ -196,7 +186,7 @@ export default function Chatbot() {
         )}
       </div>
 
-      {/* Mic toggle button */}
+      {/* 🎤 Mic Toggle */}
       <button
         onClick={handleMicToggle}
         className={`fixed bottom-8 right-8 w-14 h-14 z-50 rounded-full text-white text-2xl font-bold shadow-lg transition ${
