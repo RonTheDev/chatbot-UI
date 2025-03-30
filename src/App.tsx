@@ -17,15 +17,25 @@ export default function Chatbot() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    window.speechSynthesis.getVoices(); // preload voices
+    window.speechSynthesis.getVoices();
   }, []);
 
   const startVoiceLoop = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+
+      const audioContext = new AudioContext();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -87,9 +97,34 @@ export default function Chatbot() {
       };
 
       mediaRecorder.start();
-      setTimeout(() => {
-        mediaRecorder.stop();
-      }, 5000); // listen for 5 sec
+
+      // Silence detection loop
+      const checkSilence = () => {
+        analyser.getByteTimeDomainData(dataArray);
+        const maxAmplitude = Math.max(
+          ...dataArray.map((v) => Math.abs(v - 128))
+        );
+
+        if (maxAmplitude < 5) {
+          if (!silenceTimerRef.current) {
+            silenceTimerRef.current = setTimeout(() => {
+              mediaRecorder.stop();
+              audioContext.close();
+            }, 2000); // 2 sec silence = stop
+          }
+        } else {
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = null;
+          }
+        }
+
+        if (mediaRecorder.state === "recording") {
+          requestAnimationFrame(checkSilence);
+        }
+      };
+
+      checkSilence();
     } catch (err) {
       console.error("🎤 Mic error:", err);
     }
