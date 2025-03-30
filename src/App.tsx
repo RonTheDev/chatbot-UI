@@ -13,82 +13,101 @@ export default function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([
     { sender: "bot", text: "ברוך הבא, איך אפשר לעזור?" },
   ]);
-  const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<any>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  useEffect(() => {
-    window.speechSynthesis.getVoices(); // preload
-  }, []);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  const listenAndReply = () => {
-    const SpeechRecognition =
-      (window as any).webkitSpeechRecognition ||
-      (window as any).SpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognition.lang = "he-IL";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
+  const startListening = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
 
-    recognition.onresult = async (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      console.log("🎙️ User said:", transcript);
-      setMessages((prev) => [...prev, { sender: "user", text: transcript }]);
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
 
-      try {
-        const response = await fetch(`${FLASK_SERVER_URL}/speak`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: transcript }),
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: "audio/webm",
         });
+        const formData = new FormData();
+        formData.append("audio", audioBlob, "input.webm");
 
-        if (!response.ok) throw new Error("TTS Request failed");
+        console.log("🎙️ Sending audio to server...");
 
-        const audioBlob = await response.blob();
-        const audioUrl = URL.createObjectURL(audioBlob);
+        try {
+          const response = await fetch(`${FLASK_SERVER_URL}/transcribe`, {
+            method: "POST",
+            body: formData,
+          });
 
-        const audio = new Audio(audioUrl);
-        audioRef.current = audio;
+          const result = await response.json();
+          const transcript = result.transcription || "";
 
-        setMessages((prev) => [
-          ...prev,
-          { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
-        ]);
+          if (!transcript) throw new Error("No transcription received");
 
-        audio.onended = () => {
-          console.log("🔁 Finished speaking, restarting loop");
-          if (isVoiceMode) setTimeout(() => listenAndReply(), 400);
-        };
+          setMessages((prev) => [
+            ...prev,
+            { sender: "user", text: transcript },
+          ]);
 
-        audio.onerror = (err) => {
-          console.error("Audio error", err);
-          if (isVoiceMode) setTimeout(() => listenAndReply(), 1000);
-        };
+          const ttsRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: transcript }),
+          });
 
-        audio.play();
-      } catch (err) {
-        console.error("TTS Error:", err);
-        setMessages((prev) => [
-          ...prev,
-          { sender: "bot", text: "שגיאה בהשמעת קול." },
-        ]);
-        if (isVoiceMode) setTimeout(() => listenAndReply(), 1000);
-      }
-    };
+          const ttsBlob = await ttsRes.blob();
+          const audioUrl = URL.createObjectURL(ttsBlob);
+          const audio = new Audio(audioUrl);
 
-    recognition.onerror = (err: any) => {
-      console.error("Recognition error:", err);
-      if (isVoiceMode) setTimeout(() => listenAndReply(), 1000);
-    };
+          setMessages((prev) => [
+            ...prev,
+            { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
+          ]);
 
-    recognition.onend = () => setIsListening(false);
+          audio.onended = () => {
+            console.log("🔁 Finished speaking, restarting loop");
+            if (isVoiceMode) startListening(); // loop
+          };
 
-    recognitionRef.current = recognition;
-    setIsListening(true);
-    recognition.start();
+          audio.onerror = (e) => {
+            console.error("Audio error", e);
+            if (isVoiceMode) setTimeout(() => startListening(), 1000);
+          };
+
+          audio.play();
+        } catch (err) {
+          console.error("Voice flow error:", err);
+          setMessages((prev) => [
+            ...prev,
+            { sender: "bot", text: "מצטער, הייתה שגיאה בתהליך השמע." },
+          ]);
+          if (isVoiceMode) setTimeout(() => startListening(), 1000);
+        }
+      };
+
+      setIsListening(true);
+      mediaRecorder.start();
+
+      setTimeout(() => {
+        if (mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
+      }, 4000); // listen for 4 seconds
+    } catch (err) {
+      console.error("🎤 Mic error:", err);
+      setIsListening(false);
+    }
   };
 
   const handleMicToggle = () => {
@@ -96,30 +115,14 @@ export default function Chatbot() {
     setIsVoiceMode(newState);
 
     if (newState) {
-      listenAndReply();
+      console.log("🎤 Voice mode ON");
+      startListening();
     } else {
-      recognitionRef.current?.stop();
-      window.speechSynthesis.cancel();
-      if (audioRef.current) audioRef.current.pause();
+      console.log("❌ Voice mode OFF");
+      mediaRecorderRef.current?.stop();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
       setIsListening(false);
     }
-  };
-
-  const handleSend = () => {
-    if (!input.trim()) return;
-    const newMessage: Message = { sender: "user", text: input };
-    setMessages((prev) => [...prev, newMessage]);
-    setInput("");
-    setIsTyping(true);
-
-    setTimeout(() => {
-      const botMessage: Message = {
-        sender: "bot",
-        text: "הבוט עונה בהודעה כתובה :)",
-      };
-      setMessages((prev) => [...prev, botMessage]);
-      setIsTyping(false);
-    }, 1000);
   };
 
   return (
@@ -127,14 +130,12 @@ export default function Chatbot() {
       dir="rtl"
       className="min-h-screen bg-[#0c0f1a] text-white flex flex-col items-center justify-center p-4 font-sans relative"
     >
-      {/* Voice Mode Indicator */}
       {isVoiceMode && (
         <div className="absolute inset-0 z-40 flex items-center justify-center">
           <div className="voice-pulse-circle"></div>
         </div>
       )}
 
-      {/* Chat Window */}
       <div className="w-full max-w-md h-[600px] bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden z-10">
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {!isVoiceMode &&
@@ -159,33 +160,9 @@ export default function Chatbot() {
                 </motion.div>
               </div>
             ))}
-
-          {!isVoiceMode && isTyping && (
-            <div className="text-sm text-gray-400 mt-2">...הבוט מקליד</div>
-          )}
         </div>
-
-        {!isVoiceMode && (
-          <div className="p-3 border-t border-gray-700 bg-gray-800 flex items-center gap-2">
-            <input
-              type="text"
-              className="flex-1 bg-gray-700 text-white p-2 rounded-xl outline-none text-right"
-              placeholder="כתוב את ההודעה שלך..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            />
-            <button
-              onClick={handleSend}
-              className="px-4 py-2 bg-green-600 rounded-xl hover:bg-green-500 transition"
-            >
-              שלח
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* Mic Button */}
       <button
         onClick={handleMicToggle}
         className={`fixed bottom-8 right-8 w-14 h-14 z-50 rounded-full text-white text-2xl font-bold shadow-lg transition ${
