@@ -16,12 +16,11 @@ export default function Chatbot() {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
-  const [transcripts, setTranscripts] = useState<Message[]>([]);
+  const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
-  const isSpeakingRef = useRef(false);
 
   useEffect(() => {
-    window.speechSynthesis.getVoices(); // preload voices
+    window.speechSynthesis.getVoices();
   }, []);
 
   const startListening = () => {
@@ -37,85 +36,70 @@ export default function Chatbot() {
       const transcript = event.results[0][0].transcript;
       console.log("🎙️ User said:", transcript);
 
-      // Store message for after voice mode
-      setTranscripts((prev) => [...prev, { sender: "user", text: transcript }]);
+      // Save user message to messages (transcript will show after voice mode ends)
+      setMessages((prev) => [...prev, { sender: "user", text: transcript }]);
 
       try {
-        const res = await fetch(`${FLASK_SERVER_URL}/speak`, {
+        const speakRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: transcript }),
         });
 
-        if (!res.ok) throw new Error("TTS Request failed");
+        if (!speakRes.ok) throw new Error("TTS Request failed");
 
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-
-        isSpeakingRef.current = true;
+        const audioBlob = await speakRes.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
 
         audio.onended = () => {
-          isSpeakingRef.current = false;
           if (isVoiceMode) {
             setTimeout(() => startListening(), 500);
           }
         };
 
-        audio.onerror = () => {
-          isSpeakingRef.current = false;
-          console.error("Audio playback error.");
-          if (isVoiceMode) {
-            setTimeout(() => startListening(), 1000);
-          }
+        audio.onerror = (e) => {
+          console.error("Audio error:", e);
+          if (isVoiceMode) setTimeout(() => startListening(), 1000);
         };
 
         audio.play();
 
-        setTranscripts((prev) => [
+        setMessages((prev) => [
           ...prev,
           { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
         ]);
       } catch (err) {
         console.error("TTS Error:", err);
-        setTranscripts((prev) => [
+        setMessages((prev) => [
           ...prev,
           { sender: "bot", text: "מצטער, הייתה שגיאה בהשמעת קול." },
         ]);
-        if (isVoiceMode) {
-          setTimeout(() => startListening(), 1500);
-        }
+        if (isVoiceMode) setTimeout(() => startListening(), 1500);
       }
     };
 
     recognition.onerror = () => {
-      if (isVoiceMode && !isSpeakingRef.current) {
-        setTimeout(() => startListening(), 1000);
-      }
+      if (isVoiceMode) setTimeout(() => startListening(), 1000);
     };
 
-    recognition.onend = () => {
-      if (isVoiceMode && !isSpeakingRef.current) {
-        setTimeout(() => startListening(), 1000);
-      }
-    };
+    recognition.onend = () => setIsListening(false);
 
     recognitionRef.current = recognition;
+    setIsListening(true);
     recognition.start();
   };
 
   const handleMicToggle = () => {
-    const toggled = !isVoiceMode;
-    setIsVoiceMode(toggled);
+    const newState = !isVoiceMode;
+    setIsVoiceMode(newState);
 
-    if (toggled) {
-      setTranscripts([]);
+    if (newState) {
       startListening();
     } else {
       recognitionRef.current?.stop();
       window.speechSynthesis.cancel();
-      setMessages((prev) => [...prev, ...transcripts]);
-      setTranscripts([]);
+      setIsListening(false);
     }
   };
 
@@ -141,41 +125,46 @@ export default function Chatbot() {
       dir="rtl"
       className="min-h-screen bg-[#0c0f1a] text-white flex flex-col items-center justify-center p-4 font-sans relative"
     >
+      {/* Voice mode overlay */}
       {isVoiceMode && (
         <div className="absolute inset-0 z-40 flex items-center justify-center">
           <div className="voice-pulse-circle"></div>
         </div>
       )}
 
+      {/* Chat container */}
       <div className="w-full max-w-md h-[600px] bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden z-10">
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {(isVoiceMode ? transcripts : messages).map((msg, index) => (
-            <div
-              key={index}
-              className={`flex items-end ${
-                msg.sender === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
-                className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line ${
-                  msg.sender === "user"
-                    ? "bg-blue-600 text-white self-end"
-                    : "bg-gray-700 text-white self-start"
+          {/* Only show messages after voice mode ends */}
+          {!isVoiceMode &&
+            messages.map((msg, index) => (
+              <div
+                key={index}
+                className={`flex items-end ${
+                  msg.sender === "user" ? "justify-end" : "justify-start"
                 }`}
               >
-                {msg.text}
-              </motion.div>
-            </div>
-          ))}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line ${
+                    msg.sender === "user"
+                      ? "bg-blue-600 text-white self-end"
+                      : "bg-gray-700 text-white self-start"
+                  }`}
+                >
+                  {msg.text}
+                </motion.div>
+              </div>
+            ))}
 
           {!isVoiceMode && isTyping && (
             <div className="text-sm text-gray-400 mt-2">...הבוט מקליד</div>
           )}
         </div>
 
+        {/* Input area */}
         {!isVoiceMode && (
           <div className="p-3 border-t border-gray-700 bg-gray-800 flex items-center gap-2">
             <input
@@ -196,6 +185,7 @@ export default function Chatbot() {
         )}
       </div>
 
+      {/* Mic button */}
       <button
         onClick={handleMicToggle}
         className={`fixed bottom-8 right-8 w-14 h-14 z-50 rounded-full text-white text-2xl font-bold shadow-lg transition ${
