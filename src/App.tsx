@@ -14,6 +14,7 @@ export default function Chatbot() {
     { sender: "bot", text: "ברוך הבא, איך אפשר לעזור?" },
   ]);
   const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [inputText, setInputText] = useState("");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
@@ -22,6 +23,27 @@ export default function Chatbot() {
   useEffect(() => {
     window.speechSynthesis.getVoices();
   }, []);
+
+  const sendTextPrompt = async () => {
+    if (!inputText.trim()) return;
+
+    const userMessage = inputText.trim();
+    setMessages((prev) => [...prev, { sender: "user", text: userMessage }]);
+    setInputText("");
+
+    try {
+      const res = await fetch(`${FLASK_SERVER_URL}/text`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: userMessage }),
+      });
+      const data = await res.json();
+      setMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
+    } catch (err) {
+      console.error("Text chat error:", err);
+      setMessages((prev) => [...prev, { sender: "bot", text: "שגיאה בשליחה." }]);
+    }
+  };
 
   const startVoiceLoop = async () => {
     try {
@@ -50,7 +72,7 @@ export default function Chatbot() {
         const audioBlob = new Blob(audioChunksRef.current, {
           type: "audio/webm",
         });
-        console.log("🎙️ Sending audio to server...");
+
         const formData = new FormData();
         formData.append("audio", audioBlob, "recording.webm");
 
@@ -81,13 +103,12 @@ export default function Chatbot() {
           ]);
 
           audio.onended = () => {
-            console.log("🔁 Finished speaking, restarting loop");
             if (isVoiceMode) startVoiceLoop();
           };
 
           audio.play();
         } catch (err) {
-          console.error("Voice flow error:", err);
+          console.error("Voice error:", err);
           setMessages((prev) => [
             ...prev,
             { sender: "bot", text: "שגיאה בזיהוי קול או השמעה." },
@@ -98,19 +119,16 @@ export default function Chatbot() {
 
       mediaRecorder.start();
 
-      // Silence detection loop
       const checkSilence = () => {
         analyser.getByteTimeDomainData(dataArray);
-        const maxAmplitude = Math.max(
-          ...dataArray.map((v) => Math.abs(v - 128))
-        );
+        const maxAmplitude = Math.max(...dataArray.map((v) => Math.abs(v - 128)));
 
         if (maxAmplitude < 5) {
           if (!silenceTimerRef.current) {
             silenceTimerRef.current = setTimeout(() => {
               mediaRecorder.stop();
               audioContext.close();
-            }, 2000); // 2 sec silence = stop
+            }, 2000);
           }
         } else {
           if (silenceTimerRef.current) {
@@ -126,14 +144,13 @@ export default function Chatbot() {
 
       checkSilence();
     } catch (err) {
-      console.error("🎤 Mic error:", err);
+      console.error("Mic error:", err);
     }
   };
 
   const toggleVoiceMode = () => {
     const newState = !isVoiceMode;
     setIsVoiceMode(newState);
-    console.log(newState ? "🎤 Voice mode ON" : "❌ Voice mode OFF");
 
     if (newState) {
       startVoiceLoop();
@@ -155,29 +172,47 @@ export default function Chatbot() {
 
       <div className="w-full max-w-md h-[600px] bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden z-10">
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {!isVoiceMode &&
-            messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`flex items-end ${
-                  msg.sender === "user" ? "justify-end" : "justify-start"
+          {messages.map((msg, i) => (
+            <div
+              key={i}
+              className={`flex items-end ${
+                msg.sender === "user" ? "justify-end" : "justify-start"
+              }`}
+            >
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+                className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line ${
+                  msg.sender === "user"
+                    ? "bg-blue-600 text-white self-end"
+                    : "bg-gray-700 text-white self-start"
                 }`}
               >
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line ${
-                    msg.sender === "user"
-                      ? "bg-blue-600 text-white self-end"
-                      : "bg-gray-700 text-white self-start"
-                  }`}
-                >
-                  {msg.text}
-                </motion.div>
-              </div>
-            ))}
+                {msg.text}
+              </motion.div>
+            </div>
+          ))}
         </div>
+
+        {!isVoiceMode && (
+          <div className="p-3 border-t border-gray-600 flex">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && sendTextPrompt()}
+              placeholder="הקלד הודעה..."
+              className="flex-1 p-2 rounded-l-xl bg-gray-700 text-white focus:outline-none"
+            />
+            <button
+              onClick={sendTextPrompt}
+              className="bg-blue-600 px-4 py-2 rounded-r-xl hover:bg-blue-500"
+            >
+              שלח
+            </button>
+          </div>
+        )}
       </div>
 
       <button
