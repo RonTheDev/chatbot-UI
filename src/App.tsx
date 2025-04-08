@@ -13,8 +13,8 @@ export default function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([
     { sender: "bot", text: "ברוך הבא, איך אפשר לעזור?" },
   ]);
-  const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [inputText, setInputText] = useState("");
+  const [isVoiceMode, setIsVoiceMode] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
@@ -24,24 +24,22 @@ export default function Chatbot() {
     window.speechSynthesis.getVoices();
   }, []);
 
-  const sendTextPrompt = async () => {
+  const handleTextSubmit = async () => {
     if (!inputText.trim()) return;
-
-    const userMessage = inputText.trim();
-    setMessages((prev) => [...prev, { sender: "user", text: userMessage }]);
+    const userText = inputText.trim();
     setInputText("");
+    setMessages((prev) => [...prev, { sender: "user", text: userText }]);
 
     try {
       const res = await fetch(`${FLASK_SERVER_URL}/text`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: userMessage }),
+        body: JSON.stringify({ prompt: userText }),
       });
       const data = await res.json();
       setMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
     } catch (err) {
-      console.error("Text chat error:", err);
-      setMessages((prev) => [...prev, { sender: "bot", text: "שגיאה בשליחה." }]);
+      console.error("Text request error:", err);
     }
   };
 
@@ -82,9 +80,8 @@ export default function Chatbot() {
             body: formData,
           });
           const data = await res.json();
-          if (!data.transcription) throw new Error("No transcription received");
-
           const userText = data.transcription.trim();
+
           setMessages((prev) => [...prev, { sender: "user", text: userText }]);
 
           const ttsRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
@@ -108,7 +105,7 @@ export default function Chatbot() {
 
           audio.play();
         } catch (err) {
-          console.error("Voice error:", err);
+          console.error("Voice flow error:", err);
           setMessages((prev) => [
             ...prev,
             { sender: "bot", text: "שגיאה בזיהוי קול או השמעה." },
@@ -121,7 +118,9 @@ export default function Chatbot() {
 
       const checkSilence = () => {
         analyser.getByteTimeDomainData(dataArray);
-        const maxAmplitude = Math.max(...dataArray.map((v) => Math.abs(v - 128)));
+        const maxAmplitude = Math.max(
+          ...dataArray.map((v) => Math.abs(v - 128))
+        );
 
         if (maxAmplitude < 5) {
           if (!silenceTimerRef.current) {
@@ -172,42 +171,43 @@ export default function Chatbot() {
 
       <div className="w-full max-w-md h-[600px] bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden z-10">
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`flex items-end ${
-                msg.sender === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3 }}
-                className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line ${
-                  msg.sender === "user"
-                    ? "bg-blue-600 text-white self-end"
-                    : "bg-gray-700 text-white self-start"
+          {!isVoiceMode &&
+            messages.map((msg, i) => (
+              <div
+                key={i}
+                className={`flex items-end ${
+                  msg.sender === "user" ? "justify-end" : "justify-start"
                 }`}
               >
-                {msg.text}
-              </motion.div>
-            </div>
-          ))}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line ${
+                    msg.sender === "user"
+                      ? "bg-blue-600 text-white self-end"
+                      : "bg-gray-700 text-white self-start"
+                  }`}
+                >
+                  {msg.text}
+                </motion.div>
+              </div>
+            ))}
         </div>
 
         {!isVoiceMode && (
-          <div className="p-3 border-t border-gray-600 flex">
+          <div className="flex p-2 border-t border-gray-700">
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendTextPrompt()}
-              placeholder="הקלד הודעה..."
-              className="flex-1 p-2 rounded-l-xl bg-gray-700 text-white focus:outline-none"
+              onKeyDown={(e) => e.key === "Enter" && handleTextSubmit()}
+              placeholder="כתוב הודעה..."
+              className="flex-1 bg-gray-900 text-white px-4 py-2 rounded-l-xl focus:outline-none"
             />
             <button
-              onClick={sendTextPrompt}
-              className="bg-blue-600 px-4 py-2 rounded-r-xl hover:bg-blue-500"
+              onClick={handleTextSubmit}
+              className="bg-blue-600 hover:bg-blue-500 px-4 rounded-r-xl"
             >
               שלח
             </button>

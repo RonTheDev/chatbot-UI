@@ -1,6 +1,7 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
 @keyframes pulseCircle {
   0% {
     box-shadow: 0 0 0 0 rgba(0, 255, 150, 0.7);
