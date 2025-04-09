@@ -13,37 +13,51 @@ export default function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([
     { sender: "bot", text: "ברוך הבא, איך אפשר לעזור?" },
   ]);
-  const [inputText, setInputText] = useState("");
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isRecordingRef = useRef(false);
 
-  useEffect(() => {
-    window.speechSynthesis.getVoices();
-  }, []);
-
-  const handleTextSubmit = async () => {
-    if (!inputText.trim()) return;
-    const userText = inputText.trim();
-    setInputText("");
+  const handleVoiceReply = async (userText: string) => {
     setMessages((prev) => [...prev, { sender: "user", text: userText }]);
 
     try {
-      const res = await fetch(`${FLASK_SERVER_URL}/text`, {
+      const ttsRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: userText }),
+        body: JSON.stringify({ text: userText }),
       });
-      const data = await res.json();
-      setMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
+
+      const audioData = await ttsRes.blob();
+      const audioURL = URL.createObjectURL(audioData);
+      const audio = new Audio(audioURL);
+
+      setMessages((prev) => [
+        ...prev,
+        { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
+      ]);
+
+      audio.onended = () => {
+        if (isVoiceMode) startVoiceLoop();
+      };
+
+      audio.play();
     } catch (err) {
-      console.error("Text request error:", err);
+      console.error("Voice playback error:", err);
+      setMessages((prev) => [
+        ...prev,
+        { sender: "bot", text: "שגיאה בזיהוי קול או השמעה." },
+      ]);
+      if (isVoiceMode) setTimeout(startVoiceLoop, 1000);
     }
   };
 
   const startVoiceLoop = async () => {
+    if (isRecordingRef.current) return;
+    isRecordingRef.current = true;
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -55,7 +69,6 @@ export default function Chatbot() {
       source.connect(analyser);
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -81,36 +94,12 @@ export default function Chatbot() {
           });
           const data = await res.json();
           const userText = data.transcription.trim();
-
-          setMessages((prev) => [...prev, { sender: "user", text: userText }]);
-
-          const ttsRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: userText }),
-          });
-
-          const audioData = await ttsRes.blob();
-          const audioURL = URL.createObjectURL(audioData);
-          const audio = new Audio(audioURL);
-
-          setMessages((prev) => [
-            ...prev,
-            { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
-          ]);
-
-          audio.onended = () => {
-            if (isVoiceMode) startVoiceLoop();
-          };
-
-          audio.play();
+          handleVoiceReply(userText);
         } catch (err) {
-          console.error("Voice flow error:", err);
-          setMessages((prev) => [
-            ...prev,
-            { sender: "bot", text: "שגיאה בזיהוי קול או השמעה." },
-          ]);
+          console.error("Transcription failed:", err);
           if (isVoiceMode) setTimeout(startVoiceLoop, 1000);
+        } finally {
+          isRecordingRef.current = false;
         }
       };
 
@@ -126,6 +115,7 @@ export default function Chatbot() {
           if (!silenceTimerRef.current) {
             silenceTimerRef.current = setTimeout(() => {
               mediaRecorder.stop();
+              stream.getTracks().forEach((t) => t.stop());
               audioContext.close();
             }, 2000);
           }
@@ -143,7 +133,8 @@ export default function Chatbot() {
 
       checkSilence();
     } catch (err) {
-      console.error("Mic error:", err);
+      console.error("Mic access error:", err);
+      isRecordingRef.current = false;
     }
   };
 
@@ -152,9 +143,11 @@ export default function Chatbot() {
     setIsVoiceMode(newState);
 
     if (newState) {
+      setMessages([]); // Optional: reset messages when entering voice mode
       startVoiceLoop();
     } else {
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      isRecordingRef.current = false;
     }
   };
 
@@ -194,25 +187,6 @@ export default function Chatbot() {
               </div>
             ))}
         </div>
-
-        {!isVoiceMode && (
-          <div className="flex p-2 border-t border-gray-700">
-            <input
-              type="text"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleTextSubmit()}
-              placeholder="כתוב הודעה..."
-              className="flex-1 bg-gray-900 text-white px-4 py-2 rounded-l-xl focus:outline-none"
-            />
-            <button
-              onClick={handleTextSubmit}
-              className="bg-blue-600 hover:bg-blue-500 px-4 rounded-r-xl"
-            >
-              שלח
-            </button>
-          </div>
-        )}
       </div>
 
       <button
