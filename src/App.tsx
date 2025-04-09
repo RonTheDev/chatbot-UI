@@ -1,5 +1,3 @@
-// App.tsx
-
 import { useState, useRef } from "react";
 import { motion } from "framer-motion";
 import "./index.css";
@@ -19,8 +17,8 @@ export default function Chatbot() {
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const streamRef = Ref<MediaStream | null>(null);
-  const silenceTimerRef = Ref<NodeJS.Timeout | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const startVoiceLoop = async () => {
     try {
@@ -126,4 +124,94 @@ export default function Chatbot() {
       const res = await fetch(`${FLASK_SERVER_URL}/text`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt
+        body: JSON.stringify({ prompt: userText }),
+      });
+      const data = await res.json();
+      setMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
+    } catch (err) {
+      console.error("Text request error:", err);
+    }
+  };
+
+  const toggleVoiceMode = () => {
+    const newState = !isVoiceMode;
+    setIsVoiceMode(newState);
+
+    if (newState) {
+      startVoiceLoop();
+    } else {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    }
+  };
+
+  return (
+    <div
+      dir="rtl"
+      className="min-h-screen bg-[#0c0f1a] text-white flex flex-col items-center justify-center p-4 font-sans relative"
+    >
+      {isVoiceMode && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center">
+          <div className="voice-pulse-circle"></div>
+        </div>
+      )}
+
+      <div className="w-full max-w-md h-[600px] bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden z-10">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {!isVoiceMode &&
+            messages.map((msg, i) => (
+              <div
+                key={i}
+                className={`flex items-end ${
+                  msg.sender === "user" ? "justify-end" : "justify-start"
+                }`}
+              >
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line ${
+                    msg.sender === "user"
+                      ? "bg-blue-600 text-white self-end"
+                      : "bg-gray-700 text-white self-start"
+                  }`}
+                >
+                  {msg.text}
+                </motion.div>
+              </div>
+            ))}
+        </div>
+
+        {!isVoiceMode && (
+          <div className="flex p-2 border-t border-gray-700">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleTextSubmit()}
+              placeholder="כתוב הודעה..."
+              className="flex-1 bg-gray-900 text-white px-4 py-2 rounded-l-xl focus:outline-none"
+            />
+            <button
+              onClick={handleTextSubmit}
+              className="bg-blue-600 hover:bg-blue-500 px-4 rounded-r-xl"
+            >
+              שלח
+            </button>
+          </div>
+        )}
+      </div>
+
+      <button
+        onClick={toggleVoiceMode}
+        className={`fixed bottom-8 right-8 w-14 h-14 z-50 rounded-full text-white text-2xl font-bold shadow-lg transition ${
+          isVoiceMode
+            ? "bg-green-600 animate-pulse-glow"
+            : "bg-red-600 hover:bg-red-500"
+        }`}
+        title="הפעל / כבה מצב קולי"
+      >
+        🎤
+      </button>
+    </div>
+  );
+}
