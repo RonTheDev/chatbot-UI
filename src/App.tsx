@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import "./index.css";
 
@@ -20,6 +20,25 @@ export default function Chatbot() {
   const streamRef = useRef<MediaStream | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const handleTextSubmit = async () => {
+    if (!inputText.trim()) return;
+    const userText = inputText.trim();
+    setInputText("");
+    setMessages((prev) => [...prev, { sender: "user", text: userText }]);
+
+    try {
+      const res = await fetch(`${FLASK_SERVER_URL}/text`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: userText }),
+      });
+      const data = await res.json();
+      setMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
+    } catch (err) {
+      console.error("Text request error:", err);
+    }
+  };
+
   const startVoiceLoop = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -32,6 +51,7 @@ export default function Chatbot() {
       source.connect(analyser);
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -57,6 +77,7 @@ export default function Chatbot() {
           });
           const data = await res.json();
           const userText = data.transcription.trim();
+
           setMessages((prev) => [...prev, { sender: "user", text: userText }]);
 
           const ttsRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
@@ -68,19 +89,24 @@ export default function Chatbot() {
           const audioData = await ttsRes.blob();
           const audioURL = URL.createObjectURL(audioData);
           const audio = new Audio(audioURL);
-          setMessages((prev) => [...prev, { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" }]);
+
+          setMessages((prev) => [
+            ...prev,
+            { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
+          ]);
 
           audio.onended = () => {
-            if (isVoiceMode) {
-              setTimeout(() => startVoiceLoop(), 300); // short delay between loops
-            }
+            if (isVoiceMode) startVoiceLoop();
           };
 
           audio.play();
         } catch (err) {
           console.error("Voice flow error:", err);
-          setMessages((prev) => [...prev, { sender: "bot", text: "שגיאה בזיהוי קול או השמעה." }]);
-          if (isVoiceMode) setTimeout(() => startVoiceLoop(), 1000);
+          setMessages((prev) => [
+            ...prev,
+            { sender: "bot", text: "שגיאה בזיהוי קול או השמעה." },
+          ]);
+          if (isVoiceMode) setTimeout(startVoiceLoop, 1000);
         }
       };
 
@@ -89,12 +115,13 @@ export default function Chatbot() {
       const checkSilence = () => {
         analyser.getByteTimeDomainData(dataArray);
         const maxAmplitude = Math.max(...dataArray.map((v) => Math.abs(v - 128)));
+
         if (maxAmplitude < 5) {
           if (!silenceTimerRef.current) {
             silenceTimerRef.current = setTimeout(() => {
               mediaRecorder.stop();
               audioContext.close();
-            }, 1500); // silence duration
+            }, 2000);
           }
         } else {
           if (silenceTimerRef.current) {
@@ -111,25 +138,6 @@ export default function Chatbot() {
       checkSilence();
     } catch (err) {
       console.error("Mic error:", err);
-    }
-  };
-
-  const handleTextSubmit = async () => {
-    if (!inputText.trim()) return;
-    const userText = inputText.trim();
-    setInputText("");
-    setMessages((prev) => [...prev, { sender: "user", text: userText }]);
-
-    try {
-      const res = await fetch(`${FLASK_SERVER_URL}/text`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: userText }),
-      });
-      const data = await res.json();
-      setMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
-    } catch (err) {
-      console.error("Text request error:", err);
     }
   };
 
