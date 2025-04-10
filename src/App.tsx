@@ -15,10 +15,12 @@ export default function Chatbot() {
   ]);
   const [inputText, setInputText] = useState("");
   const [isVoiceMode, setIsVoiceMode] = useState(false);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const restartTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleTextSubmit = async () => {
     if (!inputText.trim()) return;
@@ -51,15 +53,12 @@ export default function Chatbot() {
       source.connect(analyser);
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
 
       mediaRecorder.onstop = async () => {
@@ -89,17 +88,25 @@ export default function Chatbot() {
           const audioData = await ttsRes.blob();
           const audioURL = URL.createObjectURL(audioData);
           const audio = new Audio(audioURL);
+          audioRef.current = audio;
 
           setMessages((prev) => [
             ...prev,
             { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
           ]);
 
+          audio.play();
+
+          // Fallback: if .onended fails, restart after 5s
+          if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+          restartTimerRef.current = setTimeout(() => {
+            if (isVoiceMode) startVoiceLoop();
+          }, 5500);
+
           audio.onended = () => {
+            clearTimeout(restartTimerRef.current!);
             if (isVoiceMode) startVoiceLoop();
           };
-
-          audio.play();
         } catch (err) {
           console.error("Voice flow error:", err);
           setMessages((prev) => [
@@ -114,23 +121,18 @@ export default function Chatbot() {
 
       const checkSilence = () => {
         analyser.getByteTimeDomainData(dataArray);
-        const maxAmplitude = Math.max(...dataArray.map((v) => Math.abs(v - 128)));
+        const maxAmplitude = Math.max(
+          ...dataArray.map((v) => Math.abs(v - 128))
+        );
 
         if (maxAmplitude < 5) {
-          if (!silenceTimerRef.current) {
-            silenceTimerRef.current = setTimeout(() => {
+          setTimeout(() => {
+            if (mediaRecorder.state === "recording") {
               mediaRecorder.stop();
               audioContext.close();
-            }, 2000);
-          }
+            }
+          }, 2000);
         } else {
-          if (silenceTimerRef.current) {
-            clearTimeout(silenceTimerRef.current);
-            silenceTimerRef.current = null;
-          }
-        }
-
-        if (mediaRecorder.state === "recording") {
           requestAnimationFrame(checkSilence);
         }
       };
@@ -149,6 +151,10 @@ export default function Chatbot() {
       startVoiceLoop();
     } else {
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
     }
   };
 
