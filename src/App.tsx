@@ -17,6 +17,7 @@ export default function Chatbot() {
   const [isVoiceMode, setIsVoiceMode] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [errorCount, setErrorCount] = useState(0);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -26,7 +27,11 @@ export default function Chatbot() {
 
   // Monitor voice mode state
   useEffect(() => {
+    console.log("Voice mode changed:", isVoiceMode);
     voiceLoopRef.current = isVoiceMode;
+    
+    // Reset error count when toggling voice mode
+    setErrorCount(0);
     
     // Clean up function to handle component unmount or voice mode deactivation
     return () => {
@@ -35,6 +40,7 @@ export default function Chatbot() {
   }, [isVoiceMode]);
 
   const cleanupVoiceResources = () => {
+    console.log("Cleaning up voice resources");
     // Stop any ongoing recording
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
       mediaRecorderRef.current.stop();
@@ -69,20 +75,37 @@ export default function Chatbot() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: userText }),
       });
+      
+      if (!res.ok) {
+        throw new Error(`Server returned status: ${res.status}`);
+      }
+      
       const data = await res.json();
       setMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
     } catch (err) {
       console.error("Text request error:", err);
+      setMessages((prev) => [...prev, { sender: "bot", text: "שגיאה בקבלת תשובה. נסה שוב." }]);
     }
   };
 
   const startVoiceLoop = async () => {
     if (!voiceLoopRef.current) return;
     
+    // If we've had too many consecutive errors, exit voice mode
+    if (errorCount > 3) {
+      setMessages((prev) => [...prev, { 
+        sender: "bot", 
+        text: "יותר מדי שגיאות ברצף. מצב קולי מושבת." 
+      }]);
+      setIsVoiceMode(false);
+      return;
+    }
+    
     setIsListening(true);
     setIsProcessing(false);
     
     try {
+      console.log("Starting recording...");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
@@ -93,7 +116,9 @@ export default function Chatbot() {
       source.connect(analyser);
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      const mediaRecorder = new MediaRecorder(stream);
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -104,11 +129,19 @@ export default function Chatbot() {
       mediaRecorder.onstop = async () => {
         if (!voiceLoopRef.current) return;
         
+        console.log("Recording stopped, processing audio...");
         setIsListening(false);
         setIsProcessing(true);
         
+        if (audioChunksRef.current.length === 0) {
+          console.error("No audio chunks recorded");
+          setErrorCount(prev => prev + 1);
+          setTimeout(() => startVoiceLoop(), 1000);
+          return;
+        }
+        
         const audioBlob = new Blob(audioChunksRef.current, {
-          type: "audio/webm",
+          type: "audio/webm"
         });
 
         // Clean up audio chunks
@@ -119,6 +152,7 @@ export default function Chatbot() {
 
         try {
           // Step 1: Send audio for transcription
+          console.log("Sending audio for transcription...");
           const res = await fetch(`${FLASK_SERVER_URL}/transcribe`, {
             method: "POST",
             body: formData,
@@ -129,16 +163,22 @@ export default function Chatbot() {
           }
           
           const data = await res.json();
-          const userText = data.transcription.trim();
+          console.log("Transcription result:", data);
+          
+          const userText = data.transcription ? data.transcription.trim() : "";
 
           if (!userText) {
-            throw new Error("Empty transcription received");
+            console.log("Empty transcription, restarting loop");
+            // Don't count empty transcriptions as errors
+            setTimeout(() => startVoiceLoop(), 500);
+            return;
           }
 
           // Step 2: Add user message to chat
           setMessages((prev) => [...prev, { sender: "user", text: userText }]);
 
-          // Step 3: Get response and audio in one go (optimized backend endpoint)
+          // Step 3: Get response and audio in one go
+          console.log("Getting voice response...");
           const voiceRes = await fetch(`${FLASK_SERVER_URL}/voice-response`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -149,23 +189,37 @@ export default function Chatbot() {
             throw new Error(`Voice response failed with status: ${voiceRes.status}`);
           }
 
+          // Reset error count on success
+          setErrorCount(0);
+          
           const audioData = await voiceRes.blob();
-          const responseTextHeader = voiceRes.headers.get('X-Response-Text');
+          
+          // Get the base64 encoded response text header and decode it
+          const responseTextB64 = voiceRes.headers.get('X-Response-Text-B64');
+          let responseText = "";
+          
+          if (responseTextB64) {
+            try {
+              // Decode the base64 header to get the Hebrew text
+              responseText = atob(responseTextB64);
+              // Convert from binary string to UTF-8
+              responseText = new TextDecoder("utf-8").decode(
+                new Uint8Array([...responseText].map(c => c.charCodeAt(0)))
+              );
+            } catch (e) {
+              console.error("Failed to decode response text:", e);
+              responseText = "(תוכן התשובה לא זמין)";
+            }
+          }
           
           // Add bot message with the text response
-          if (responseTextHeader) {
-            setMessages((prev) => [
-              ...prev,
-              { sender: "bot", text: responseTextHeader },
-            ]);
-          } else {
-            setMessages((prev) => [
-              ...prev,
-              { sender: "bot", text: "(🔊 קול הופעל)" },
-            ]);
-          }
+          setMessages((prev) => [
+            ...prev,
+            { sender: "bot", text: responseText || "(🔊 קול הופעל)" },
+          ]);
 
           // Play the audio response
+          console.log("Playing audio response...");
           const audioURL = URL.createObjectURL(audioData);
           const audio = new Audio(audioURL);
           audioRef.current = audio;
@@ -179,6 +233,7 @@ export default function Chatbot() {
                 hasResolved = true;
                 resolve();
                 URL.revokeObjectURL(audioURL);
+                console.log("Audio playback finished");
               }
             };
             
@@ -187,42 +242,62 @@ export default function Chatbot() {
             
             // Method 2: ontimeupdate as backup
             audio.ontimeupdate = () => {
-              if (audio.currentTime > 0 && audio.currentTime >= audio.duration - 0.1) {
+              if (audio.currentTime > 0 && audio.duration > 0 && 
+                  audio.currentTime >= audio.duration - 0.1) {
                 finishPlayback();
               }
             };
             
             // Method 3: Fallback timer based on audio duration
             audio.onloadedmetadata = () => {
-              const duration = audio.duration * 1000 + 500; // Duration in ms plus buffer
+              const duration = Math.max(audio.duration * 1000 + 500, 3000);
               setTimeout(finishPlayback, duration);
             };
             
             // Method 4: Absolute fallback
-            setTimeout(finishPlayback, 10000); // 10 second absolute maximum
+            setTimeout(finishPlayback, 10000);
+            
+            // Method 5: Error handler
+            audio.onerror = (e) => {
+              console.error("Audio playback error:", e);
+              finishPlayback();
+            };
             
             // Start playing
             audio.play().catch(err => {
-              console.error("Audio playback error:", err);
+              console.error("Audio play() error:", err);
               finishPlayback();
             });
+          }).finally(() => {
+            // Continue the voice loop after playback
+            if (voiceLoopRef.current) {
+              console.log("Voice loop continuing...");
+              setIsProcessing(false);
+              setTimeout(startVoiceLoop, 500);
+            }
           });
         } catch (err) {
           console.error("Voice flow error:", err);
+          
+          // Increment error count
+          setErrorCount(prev => prev + 1);
+          
           setMessages((prev) => [
             ...prev,
-            { sender: "bot", text: "שגיאה בזיהוי קול או השמעה." },
+            { sender: "bot", text: "שגיאה בזיהוי קול או השמעה. מנסה שוב..." },
           ]);
-        } finally {
-          // Wait a moment before starting the next loop
+          
+          // Try again with backoff
+          const backoff = Math.min(errorCount * 1000, 5000);
           if (voiceLoopRef.current) {
             setIsProcessing(false);
-            setTimeout(startVoiceLoop, 500);
+            setTimeout(startVoiceLoop, backoff);
           }
         }
       };
 
       mediaRecorder.start();
+      console.log("Media recorder started");
 
       // Silence detection to automatically stop recording
       const silenceThreshold = 5;
@@ -246,6 +321,7 @@ export default function Chatbot() {
           } else if (now - silenceStart >= silenceDuration) {
             // Stop recording after silence duration
             if (mediaRecorder.state === "recording") {
+              console.log("Silence detected, stopping recording");
               mediaRecorder.stop();
               audioContext.close();
               return; // Exit the loop
@@ -265,10 +341,17 @@ export default function Chatbot() {
       console.error("Mic error:", err);
       setIsListening(false);
       setIsProcessing(false);
+      setErrorCount(prev => prev + 1);
       
-      // Try to restart after error
+      setMessages((prev) => [
+        ...prev,
+        { sender: "bot", text: "שגיאה בגישה למיקרופון. מנסה שוב..." },
+      ]);
+      
+      // Try to restart after error with backoff
+      const backoff = Math.min(errorCount * 1000, 5000);
       if (voiceLoopRef.current) {
-        setTimeout(startVoiceLoop, 2000);
+        setTimeout(startVoiceLoop, backoff);
       }
     }
   };
@@ -279,6 +362,7 @@ export default function Chatbot() {
 
     if (newState) {
       voiceLoopRef.current = true;
+      setErrorCount(0);
       startVoiceLoop();
     } else {
       voiceLoopRef.current = false;
@@ -350,7 +434,9 @@ export default function Chatbot() {
         onClick={toggleVoiceMode}
         className={`fixed bottom-8 right-8 w-14 h-14 z-50 rounded-full text-white text-2xl font-bold shadow-lg transition ${
           isVoiceMode
-            ? "bg-green-600 animate-pulse-glow"
+            ? isProcessing 
+              ? "bg-yellow-600 animate-pulse"
+              : "bg-green-600 animate-pulse-glow" 
             : "bg-red-600 hover:bg-red-500"
         }`}
         title="הפעל / כבה מצב קולי"
