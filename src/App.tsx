@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import "./index.css";
 
@@ -15,12 +15,47 @@ export default function Chatbot() {
   ]);
   const [inputText, setInputText] = useState("");
   const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const restartTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const voiceLoopRef = useRef<boolean>(false);
+
+  // Monitor voice mode state
+  useEffect(() => {
+    voiceLoopRef.current = isVoiceMode;
+    
+    // Clean up function to handle component unmount or voice mode deactivation
+    return () => {
+      cleanupVoiceResources();
+    };
+  }, [isVoiceMode]);
+
+  const cleanupVoiceResources = () => {
+    // Stop any ongoing recording
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+    
+    // Stop the audio stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    
+    // Stop any playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+      audioRef.current = null;
+    }
+    
+    setIsListening(false);
+    setIsProcessing(false);
+  };
 
   const handleTextSubmit = async () => {
     if (!inputText.trim()) return;
@@ -42,6 +77,11 @@ export default function Chatbot() {
   };
 
   const startVoiceLoop = async () => {
+    if (!voiceLoopRef.current) return;
+    
+    setIsListening(true);
+    setIsProcessing(false);
+    
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -62,84 +102,174 @@ export default function Chatbot() {
       };
 
       mediaRecorder.onstop = async () => {
+        if (!voiceLoopRef.current) return;
+        
+        setIsListening(false);
+        setIsProcessing(true);
+        
         const audioBlob = new Blob(audioChunksRef.current, {
           type: "audio/webm",
         });
+
+        // Clean up audio chunks
+        audioChunksRef.current = [];
 
         const formData = new FormData();
         formData.append("audio", audioBlob, "recording.webm");
 
         try {
+          // Step 1: Send audio for transcription
           const res = await fetch(`${FLASK_SERVER_URL}/transcribe`, {
             method: "POST",
             body: formData,
           });
+          
+          if (!res.ok) {
+            throw new Error(`Transcription failed with status: ${res.status}`);
+          }
+          
           const data = await res.json();
           const userText = data.transcription.trim();
 
+          if (!userText) {
+            throw new Error("Empty transcription received");
+          }
+
+          // Step 2: Add user message to chat
           setMessages((prev) => [...prev, { sender: "user", text: userText }]);
 
-          const ttsRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
+          // Step 3: Get response and audio in one go (optimized backend endpoint)
+          const voiceRes = await fetch(`${FLASK_SERVER_URL}/voice-response`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: userText }),
           });
 
-          const audioData = await ttsRes.blob();
+          if (!voiceRes.ok) {
+            throw new Error(`Voice response failed with status: ${voiceRes.status}`);
+          }
+
+          const audioData = await voiceRes.blob();
+          const responseTextHeader = voiceRes.headers.get('X-Response-Text');
+          
+          // Add bot message with the text response
+          if (responseTextHeader) {
+            setMessages((prev) => [
+              ...prev,
+              { sender: "bot", text: responseTextHeader },
+            ]);
+          } else {
+            setMessages((prev) => [
+              ...prev,
+              { sender: "bot", text: "(🔊 קול הופעל)" },
+            ]);
+          }
+
+          // Play the audio response
           const audioURL = URL.createObjectURL(audioData);
           const audio = new Audio(audioURL);
           audioRef.current = audio;
-
-          setMessages((prev) => [
-            ...prev,
-            { sender: "bot", text: "(🔊 קול הופעל על ידי OpenAI TTS)" },
-          ]);
-
-          audio.play();
-
-          // Fallback: if .onended fails, restart after 5s
-          if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-          restartTimerRef.current = setTimeout(() => {
-            if (isVoiceMode) startVoiceLoop();
-          }, 5500);
-
-          audio.onended = () => {
-            clearTimeout(restartTimerRef.current!);
-            if (isVoiceMode) startVoiceLoop();
-          };
+          
+          // Set up multiple ways to detect audio completion for better reliability
+          return new Promise<void>((resolve) => {
+            let hasResolved = false;
+            
+            const finishPlayback = () => {
+              if (!hasResolved) {
+                hasResolved = true;
+                resolve();
+                URL.revokeObjectURL(audioURL);
+              }
+            };
+            
+            // Method 1: onended event
+            audio.onended = finishPlayback;
+            
+            // Method 2: ontimeupdate as backup
+            audio.ontimeupdate = () => {
+              if (audio.currentTime > 0 && audio.currentTime >= audio.duration - 0.1) {
+                finishPlayback();
+              }
+            };
+            
+            // Method 3: Fallback timer based on audio duration
+            audio.onloadedmetadata = () => {
+              const duration = audio.duration * 1000 + 500; // Duration in ms plus buffer
+              setTimeout(finishPlayback, duration);
+            };
+            
+            // Method 4: Absolute fallback
+            setTimeout(finishPlayback, 10000); // 10 second absolute maximum
+            
+            // Start playing
+            audio.play().catch(err => {
+              console.error("Audio playback error:", err);
+              finishPlayback();
+            });
+          });
         } catch (err) {
           console.error("Voice flow error:", err);
           setMessages((prev) => [
             ...prev,
             { sender: "bot", text: "שגיאה בזיהוי קול או השמעה." },
           ]);
-          if (isVoiceMode) setTimeout(startVoiceLoop, 1000);
+        } finally {
+          // Wait a moment before starting the next loop
+          if (voiceLoopRef.current) {
+            setIsProcessing(false);
+            setTimeout(startVoiceLoop, 500);
+          }
         }
       };
 
       mediaRecorder.start();
 
+      // Silence detection to automatically stop recording
+      const silenceThreshold = 5;
+      let silenceStart: number | null = null;
+      const silenceDuration = 2000; // 2 seconds of silence
+
       const checkSilence = () => {
+        if (!voiceLoopRef.current || mediaRecorder.state !== "recording") return;
+        
         analyser.getByteTimeDomainData(dataArray);
         const maxAmplitude = Math.max(
           ...dataArray.map((v) => Math.abs(v - 128))
         );
 
-        if (maxAmplitude < 5) {
-          setTimeout(() => {
+        const now = Date.now();
+        
+        if (maxAmplitude < silenceThreshold) {
+          // Start counting silence if not already
+          if (silenceStart === null) {
+            silenceStart = now;
+          } else if (now - silenceStart >= silenceDuration) {
+            // Stop recording after silence duration
             if (mediaRecorder.state === "recording") {
               mediaRecorder.stop();
               audioContext.close();
+              return; // Exit the loop
             }
-          }, 2000);
+          }
         } else {
-          requestAnimationFrame(checkSilence);
+          // Reset silence counter on sound
+          silenceStart = null;
         }
+        
+        // Continue checking
+        requestAnimationFrame(checkSilence);
       };
 
       checkSilence();
     } catch (err) {
       console.error("Mic error:", err);
+      setIsListening(false);
+      setIsProcessing(false);
+      
+      // Try to restart after error
+      if (voiceLoopRef.current) {
+        setTimeout(startVoiceLoop, 2000);
+      }
     }
   };
 
@@ -148,13 +278,11 @@ export default function Chatbot() {
     setIsVoiceMode(newState);
 
     if (newState) {
+      voiceLoopRef.current = true;
       startVoiceLoop();
     } else {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
+      voiceLoopRef.current = false;
+      cleanupVoiceResources();
     }
   };
 
@@ -165,34 +293,37 @@ export default function Chatbot() {
     >
       {isVoiceMode && (
         <div className="absolute inset-0 z-40 flex items-center justify-center">
-          <div className="voice-pulse-circle"></div>
+          {isListening ? (
+            <div className="voice-pulse-circle"></div>
+          ) : isProcessing ? (
+            <div className="processing-indicator">מעבד...</div>
+          ) : null}
         </div>
       )}
 
       <div className="w-full max-w-md h-[600px] bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden z-10">
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {!isVoiceMode &&
-            messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`flex items-end ${
-                  msg.sender === "user" ? "justify-end" : "justify-start"
+          {messages.map((msg, i) => (
+            <div
+              key={i}
+              className={`flex items-end ${
+                msg.sender === "user" ? "justify-end" : "justify-start"
+              }`}
+            >
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+                className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line ${
+                  msg.sender === "user"
+                    ? "bg-blue-600 text-white self-end"
+                    : "bg-gray-700 text-white self-start"
                 }`}
               >
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line ${
-                    msg.sender === "user"
-                      ? "bg-blue-600 text-white self-end"
-                      : "bg-gray-700 text-white self-start"
-                  }`}
-                >
-                  {msg.text}
-                </motion.div>
-              </div>
-            ))}
+                {msg.text}
+              </motion.div>
+            </div>
+          ))}
         </div>
 
         {!isVoiceMode && (
