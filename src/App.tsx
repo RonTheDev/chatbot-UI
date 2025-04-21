@@ -27,12 +27,7 @@ export default function Chatbot() {
   const voiceLoopRef = useRef<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages]);
+  // CHANGE 1: Removed auto-scroll useEffect that was here
 
   // Monitor voice mode state
   useEffect(() => {
@@ -452,9 +447,7 @@ export default function Chatbot() {
         <div className="p-4 bg-gray-900 border-b border-gray-700 flex items-center justify-between">
           <h2 className="text-xl font-semibold text-white">צ'אט בוט חכם</h2>
           <div className="flex items-center space-x-2">
-            {isProcessing && !isListening && (
-              <span className="text-xs text-yellow-400 pl-2">מעבד...</span>
-            )}
+            {/* CHANGE 2: Removed processing indicator from header here */}
           </div>
         </div>
         
