@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import "./index.css";
 
 interface Message {
@@ -18,12 +18,21 @@ export default function Chatbot() {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorCount, setErrorCount] = useState(0);
+  const [audioPlaybackInProgress, setAudioPlaybackInProgress] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const voiceLoopRef = useRef<boolean>(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]);
 
   // Monitor voice mode state
   useEffect(() => {
@@ -61,6 +70,7 @@ export default function Chatbot() {
     
     setIsListening(false);
     setIsProcessing(false);
+    setAudioPlaybackInProgress(false);
   };
 
   const handleTextSubmit = async () => {
@@ -70,6 +80,7 @@ export default function Chatbot() {
     setMessages((prev) => [...prev, { sender: "user", text: userText }]);
 
     try {
+      setIsProcessing(true);
       const res = await fetch(`${FLASK_SERVER_URL}/text`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,11 +96,19 @@ export default function Chatbot() {
     } catch (err) {
       console.error("Text request error:", err);
       setMessages((prev) => [...prev, { sender: "bot", text: "שגיאה בקבלת תשובה. נסה שוב." }]);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   const startVoiceLoop = async () => {
     if (!voiceLoopRef.current) return;
+    
+    // Don't start a new recording if audio is playing
+    if (audioPlaybackInProgress) {
+      console.log("Audio playback in progress, delaying voice loop restart");
+      return;
+    }
     
     // If we've had too many consecutive errors, exit voice mode
     if (errorCount > 3) {
@@ -218,6 +237,9 @@ export default function Chatbot() {
             { sender: "bot", text: responseText || "(🔊 קול הופעל)" },
           ]);
 
+          // Set flag to prevent new recordings during audio playback
+          setAudioPlaybackInProgress(true);
+
           // Play the audio response
           console.log("Playing audio response...");
           const audioURL = URL.createObjectURL(audioData);
@@ -231,6 +253,7 @@ export default function Chatbot() {
             const finishPlayback = () => {
               if (!hasResolved) {
                 hasResolved = true;
+                setAudioPlaybackInProgress(false);
                 resolve();
                 URL.revokeObjectURL(audioURL);
                 console.log("Audio playback finished");
@@ -254,8 +277,8 @@ export default function Chatbot() {
               setTimeout(finishPlayback, duration);
             };
             
-            // Method 4: Absolute fallback
-            setTimeout(finishPlayback, 10000);
+            // Method 4: Absolute fallback with a longer timeout (15s)
+            setTimeout(finishPlayback, 15000);
             
             // Method 5: Error handler
             audio.onerror = (e) => {
@@ -269,11 +292,16 @@ export default function Chatbot() {
               finishPlayback();
             });
           }).finally(() => {
-            // Continue the voice loop after playback
+            // Continue the voice loop after playback and a small delay
             if (voiceLoopRef.current) {
               console.log("Voice loop continuing...");
               setIsProcessing(false);
-              setTimeout(startVoiceLoop, 500);
+              // Add a small delay before starting the next recording
+              setTimeout(() => {
+                if (voiceLoopRef.current && !audioPlaybackInProgress) {
+                  startVoiceLoop();
+                }
+              }, 800);
             }
           });
         } catch (err) {
@@ -291,6 +319,7 @@ export default function Chatbot() {
           const backoff = Math.min(errorCount * 1000, 5000);
           if (voiceLoopRef.current) {
             setIsProcessing(false);
+            setAudioPlaybackInProgress(false);
             setTimeout(startVoiceLoop, backoff);
           }
         }
@@ -351,6 +380,7 @@ export default function Chatbot() {
       // Try to restart after error with backoff
       const backoff = Math.min(errorCount * 1000, 5000);
       if (voiceLoopRef.current) {
+        setAudioPlaybackInProgress(false);
         setTimeout(startVoiceLoop, backoff);
       }
     }
@@ -363,6 +393,7 @@ export default function Chatbot() {
     if (newState) {
       voiceLoopRef.current = true;
       setErrorCount(0);
+      setAudioPlaybackInProgress(false);
       startVoiceLoop();
     } else {
       voiceLoopRef.current = false;
@@ -373,20 +404,62 @@ export default function Chatbot() {
   return (
     <div
       dir="rtl"
-      className="min-h-screen bg-[#0c0f1a] text-white flex flex-col items-center justify-center p-4 font-sans relative"
+      className="min-h-screen bg-gradient-to-b from-[#0c0f1a] to-[#161b2e] text-white flex flex-col items-center justify-center p-4 font-sans relative"
     >
-      {isVoiceMode && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center">
-          {isListening ? (
-            <div className="voice-pulse-circle"></div>
-          ) : isProcessing ? (
-            <div className="processing-indicator">מעבד...</div>
-          ) : null}
-        </div>
-      )}
+      {/* Status indicators for voice mode */}
+      <AnimatePresence>
+        {isVoiceMode && (isListening || isProcessing) && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-40 flex items-center justify-center"
+          >
+            {isListening && (
+              <div className="flex flex-col items-center">
+                <div className="voice-pulse-circle"></div>
+                <motion.p 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-lg text-green-400 font-medium mt-6 animate-pulse"
+                >
+                  מקשיב...
+                </motion.p>
+              </div>
+            )}
+            {isProcessing && (
+              <div className="flex flex-col items-center">
+                <div className="processing-indicator p-8 rounded-full bg-gray-800 bg-opacity-70 shadow-lg">
+                  <div className="loading-spinner"></div>
+                </div>
+                <motion.p 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-lg text-yellow-400 font-medium mt-4"
+                >
+                  מעבד...
+                </motion.p>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      <div className="w-full max-w-md h-[600px] bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden z-10">
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="w-full max-w-md h-[600px] bg-gray-800 bg-opacity-90 backdrop-blur-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden z-10 border border-gray-700">
+        {/* Header */}
+        <div className="p-4 bg-gray-900 border-b border-gray-700 flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-white">צ'אט בוט חכם</h2>
+          <div className="flex items-center space-x-2">
+            {isProcessing && !isListening && (
+              <span className="text-xs text-yellow-400 pl-2">מעבד...</span>
+            )}
+          </div>
+        </div>
+        
+        {/* Messages container */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin">
           {messages.map((msg, i) => (
             <div
               key={i}
@@ -398,7 +471,7 @@ export default function Chatbot() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
-                className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line ${
+                className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line shadow-md ${
                   msg.sender === "user"
                     ? "bg-blue-600 text-white self-end"
                     : "bg-gray-700 text-white self-start"
@@ -408,41 +481,69 @@ export default function Chatbot() {
               </motion.div>
             </div>
           ))}
+          <div ref={messagesEndRef} />
         </div>
 
+        {/* Input area */}
         {!isVoiceMode && (
-          <div className="flex p-2 border-t border-gray-700">
+          <div className="flex p-3 border-t border-gray-700 bg-gray-900">
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleTextSubmit()}
+              onKeyDown={(e) => e.key === "Enter" && !isProcessing && handleTextSubmit()}
               placeholder="כתוב הודעה..."
-              className="flex-1 bg-gray-900 text-white px-4 py-2 rounded-l-xl focus:outline-none"
+              disabled={isProcessing}
+              className="flex-1 bg-gray-800 text-white px-4 py-3 rounded-l-xl focus:outline-none focus:ring-1 focus:ring-blue-500 border border-gray-700"
             />
             <button
               onClick={handleTextSubmit}
-              className="bg-blue-600 hover:bg-blue-500 px-4 rounded-r-xl"
+              disabled={isProcessing || !inputText.trim()}
+              className={`px-5 rounded-r-xl transition-colors duration-200 flex items-center justify-center ${
+                isProcessing || !inputText.trim() 
+                  ? "bg-gray-600 cursor-not-allowed" 
+                  : "bg-blue-600 hover:bg-blue-500"
+              }`}
             >
-              שלח
+              {isProcessing ? (
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              ) : (
+                "שלח"
+              )}
             </button>
           </div>
         )}
       </div>
 
-      <button
+      {/* Voice mode toggle button */}
+      <motion.button
+        whileTap={{ scale: 0.95 }}
         onClick={toggleVoiceMode}
-        className={`fixed bottom-8 right-8 w-14 h-14 z-50 rounded-full text-white text-2xl font-bold shadow-lg transition ${
+        className={`fixed bottom-8 right-8 w-16 h-16 z-50 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg transition-all duration-300 ${
           isVoiceMode
             ? isProcessing 
               ? "bg-yellow-600 animate-pulse"
-              : "bg-green-600 animate-pulse-glow" 
+              : isListening
+                ? "bg-green-600 animate-pulse-glow" 
+                : "bg-green-600"
             : "bg-red-600 hover:bg-red-500"
         }`}
         title="הפעל / כבה מצב קולי"
       >
-        🎤
-      </button>
+        <span className="text-2xl">🎤</span>
+      </motion.button>
+
+      {/* Status indicator text */}
+      {isVoiceMode && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 10 }}
+          className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800 bg-opacity-80 px-4 py-2 rounded-full text-sm"
+        >
+          {isListening ? "מקשיב..." : isProcessing ? "מעבד..." : audioPlaybackInProgress ? "משמיע..." : "מצב קולי פעיל"}
+        </motion.div>
+      )}
     </div>
   );
 }
