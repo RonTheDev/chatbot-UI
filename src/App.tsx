@@ -9,6 +9,45 @@ interface Message {
 
 const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com";
 
+// URL regex pattern
+const URL_PATTERN = /https?:\/\/\S+/g;
+
+// Function to replace URLs with clickable links
+const formatMessageWithLinks = (text: string) => {
+  const parts = [];
+  const urls = text.match(URL_PATTERN) || [];
+  let lastIndex = 0;
+
+  if (urls.length === 0) {
+    return text;
+  }
+
+  urls.forEach((url, i) => {
+    const index = text.indexOf(url, lastIndex);
+    if (index > lastIndex) {
+      parts.push(text.substring(lastIndex, index));
+    }
+    parts.push(
+      <a 
+        key={i} 
+        href={url} 
+        target="_blank" 
+        rel="noopener noreferrer"
+        className="text-blue-300 underline break-all hover:text-blue-200"
+      >
+        קישור
+      </a>
+    );
+    lastIndex = index + url.length;
+  });
+
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+
+  return <>{parts}</>;
+};
+
 export default function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([
     { sender: "bot", text: "ברוך הבא, איך אפשר לעזור?" },
@@ -27,7 +66,12 @@ export default function Chatbot() {
   const voiceLoopRef = useRef<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // CHANGE 1: Removed auto-scroll useEffect that was here
+  // Auto-scroll to the bottom of messages container whenever messages update
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
 
   // Monitor voice mode state
   useEffect(() => {
@@ -401,7 +445,7 @@ export default function Chatbot() {
       dir="rtl"
       className="min-h-screen bg-gradient-to-b from-[#0c0f1a] to-[#161b2e] text-white flex flex-col items-center justify-center p-4 font-sans relative"
     >
-      {/* Status indicators for voice mode */}
+      {/* Status indicators for voice mode - ONLY CENTER OVERLAY */}
       <AnimatePresence>
         {isVoiceMode && (isListening || isProcessing) && (
           <motion.div 
@@ -443,12 +487,9 @@ export default function Chatbot() {
       </AnimatePresence>
 
       <div className="w-full max-w-md h-[600px] bg-gray-800 bg-opacity-90 backdrop-blur-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden z-10 border border-gray-700">
-        {/* Header */}
+        {/* Header - UPDATED TITLE */}
         <div className="p-4 bg-gray-900 border-b border-gray-700 flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-white">צ'אט בוט חכם</h2>
-          <div className="flex items-center space-x-2">
-            {/* CHANGE 2: Removed processing indicator from header here */}
-          </div>
+          <h2 className="text-xl font-semibold text-white">תות תקשורת ותוצאות</h2>
         </div>
         
         {/* Messages container */}
@@ -464,13 +505,15 @@ export default function Chatbot() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
-                className={`p-3 rounded-2xl max-w-xs text-right whitespace-pre-line shadow-md ${
+                className={`p-3 rounded-2xl max-w-xs text-right break-words shadow-md ${
                   msg.sender === "user"
                     ? "bg-blue-600 text-white self-end"
                     : "bg-gray-700 text-white self-start"
                 }`}
               >
-                {msg.text}
+                {typeof msg.text === 'string' && msg.text.match(URL_PATTERN) 
+                  ? formatMessageWithLinks(msg.text)
+                  : msg.text}
               </motion.div>
             </div>
           ))}
@@ -526,17 +569,7 @@ export default function Chatbot() {
         <span className="text-2xl">🎤</span>
       </motion.button>
 
-      {/* Status indicator text */}
-      {isVoiceMode && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 10 }}
-          className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800 bg-opacity-80 px-4 py-2 rounded-full text-sm"
-        >
-          {isListening ? "מקשיב..." : isProcessing ? "מעבד..." : audioPlaybackInProgress ? "משמיע..." : "מצב קולי פעיל"}
-        </motion.div>
-      )}
+      {/* REMOVED DUPLICATE STATUS INDICATOR */}
     </div>
   );
 }
