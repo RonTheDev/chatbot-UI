@@ -67,9 +67,8 @@ export default function Chatbot() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to the bottom of messages container whenever messages update
-  useEffect(() => {  }
-  }, [messages]);
-
+ useEffect(() => {  } }, [messages]);
+  
   // Monitor voice mode state
   useEffect(() => {
     console.log("Voice mode changed:", isVoiceMode);
