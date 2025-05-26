@@ -67,10 +67,7 @@ export default function Chatbot() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to the bottom of messages container whenever messages update
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+  useEffect(() => {  }
   }, [messages]);
 
   // Monitor voice mode state
@@ -513,7 +510,10 @@ while (true) {
         </div>
         
         {/* Messages container */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin">
+       <div
+  className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin"
+  ref={messagesEndRef}
+>
           {messages.map((msg, i) => (
             <div
               key={i}
