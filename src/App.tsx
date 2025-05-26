@@ -120,18 +120,38 @@ export default function Chatbot() {
 
     try {
       setIsProcessing(true);
-      const res = await fetch(`${FLASK_SERVER_URL}/text`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: userText }),
-      });
-      
-      if (!res.ok) {
-        throw new Error(`Server returned status: ${res.status}`);
-      }
-      
-      const data = await res.json();
-      setMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
+     const res = await fetch(`${FLASK_SERVER_URL}/text-stream`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ prompt: userText }),
+});
+
+if (!res.ok || !res.body) {
+  throw new Error(`Server returned status: ${res.status}`);
+}
+
+const reader = res.body.getReader();
+const decoder = new TextDecoder("utf-8");
+let botText = "";
+
+setMessages((prev) => [...prev, { sender: "bot", text: "" }]); // Placeholder
+
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+
+  const chunk = decoder.decode(value, { stream: true });
+  botText += chunk;
+
+  setMessages((prev) =>
+    prev.map((msg, i) =>
+      i === prev.length - 1 && msg.sender === "bot"
+        ? { ...msg, text: botText }
+        : msg
+    )
+  );
+}
+
     } catch (err) {
       console.error("Text request error:", err);
       setMessages((prev) => [...prev, { sender: "bot", text: "שגיאה בקבלת תשובה. נסה שוב." }]);
