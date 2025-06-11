@@ -10,6 +10,7 @@ interface Message {
 
 const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com";
 
+const URL_PATTERN = /https?:\/\/[^\s]+/g;
 // Cleanly hyperlink visible URLs
 const formatMessageWithLinks = (text: string) => {
   const parts = [];
