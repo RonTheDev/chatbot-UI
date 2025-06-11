@@ -348,23 +348,25 @@ while (true) {
               console.error("Audio play() error:", err);
               finishPlayback();
             });
-          }).finally(() => {
-            // Continue the voice loop after playback and a small delay
-            if (voiceLoopRef.current) {
-  console.log("Voice loop will wait for playback before continuing...");
-  
-  // Wait until audioPlaybackInProgress is false before restarting loop
-  const waitUntilPlaybackEnds = () => {
-    if (!audioPlaybackInProgress) {
-      setIsProcessing(false);
-      startVoiceLoop();
-    } else {
-      setTimeout(waitUntilPlaybackEnds, 300); // retry every 300ms
-    }
-  };
+      }).finally(() => {
+  if (voiceLoopRef.current) {
+    console.log("Voice loop will wait for playback before continuing...");
 
-  waitUntilPlaybackEnds();
-}
+    const waitUntilPlaybackEnds = () => {
+      const audio = audioRef.current;
+
+      if (!audio || audio.ended) {
+        console.log("✅ Audio playback is truly done. Resuming voice loop...");
+        setIsProcessing(false);
+        startVoiceLoop();
+      } else {
+        setTimeout(waitUntilPlaybackEnds, 200);
+      }
+    };
+
+    waitUntilPlaybackEnds();
+  }
+});
 
           });
         } catch (err) {
