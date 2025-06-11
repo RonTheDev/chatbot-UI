@@ -10,45 +10,6 @@ interface Message {
 
 const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com";
 
-// URL regex pattern
-const URL_PATTERN = /https?:\/\/\S+/g;
-
-// Function to replace URLs with clickable links
-const formatMessageWithLinks = (text: string) => {
-  const parts = [];
-  const urls = text.match(URL_PATTERN) || [];
-  let lastIndex = 0;
-
-  if (urls.length === 0) {
-    return text;
-  }
-
-  urls.forEach((url, i) => {
-    const index = text.indexOf(url, lastIndex);
-    if (index > lastIndex) {
-      parts.push(text.substring(lastIndex, index));
-    }
-    parts.push(
-      <a 
-        key={i} 
-        href={url} 
-        target="_blank" 
-        rel="noopener noreferrer"
-        className="text-blue-300 underline break-all hover:text-blue-200"
-      >
-        קישור
-      </a>
-    );
-    lastIndex = index + url.length;
-  });
-
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex));
-  }
-
-  return <>{parts}</>;
-};
-
 export default function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([
     { sender: "bot", text: "ברוך הבא, איך אפשר לעזור?", isStreaming: false },
@@ -542,9 +503,6 @@ setMessages((prev) =>
                     : "bg-gray-700 text-white self-start"
                 }`}
               >
-                {msg.sender === "bot" && msg.isStreaming === false
-                  ? formatMessageWithLinks(msg.text)
-                  : msg.text}
               </motion.div>
             </div>
           ))}
