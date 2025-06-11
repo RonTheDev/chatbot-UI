@@ -5,6 +5,7 @@ import "./index.css";
 interface Message {
   sender: "user" | "bot";
   text: string;
+  isStreaming?: boolean; // New property
 }
 
 const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com";
@@ -50,7 +51,7 @@ const formatMessageWithLinks = (text: string) => {
 
 export default function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([
-    { sender: "bot", text: "ברוך הבא, איך אפשר לעזור?" },
+    { sender: "bot", text: "ברוך הבא, איך אפשר לעזור?", isStreaming: false },
   ]);
   const [inputText, setInputText] = useState("");
   const [isVoiceMode, setIsVoiceMode] = useState(false);
@@ -134,7 +135,7 @@ const reader = res.body.getReader();
 const decoder = new TextDecoder("utf-8");
 let botText = "";
 
-setMessages((prev) => [...prev, { sender: "bot", text: "" }]); // Placeholder
+setMessages((prev) => [...prev, { sender: "bot", text: "", isStreaming: true }]); // Placeholder
 
 while (true) {
   const { done, value } = await reader.read();
@@ -146,12 +147,19 @@ while (true) {
   setMessages((prev) =>
     prev.map((msg, i) =>
       i === prev.length - 1 && msg.sender === "bot"
-        ? { ...msg, text: botText }
+        ? { ...msg, text: botText, isStreaming: true } // Maintain isStreaming
         : msg
     )
   );
 }
 
+setMessages((prev) =>
+  prev.map((msg, i) =>
+    i === prev.length - 1 && msg.sender === "bot"
+      ? { ...msg, text: botText, isStreaming: false } // Set isStreaming to false
+      : msg
+  )
+);
     } catch (err) {
       console.error("Text request error:", err);
       setMessages((prev) => [...prev, { sender: "bot", text: "שגיאה בקבלת תשובה. נסה שוב." }]);
@@ -534,7 +542,7 @@ while (true) {
                     : "bg-gray-700 text-white self-start"
                 }`}
               >
-                {typeof msg.text === 'string' && msg.text.match(URL_PATTERN) 
+                {msg.sender === "bot" && msg.isStreaming === false
                   ? formatMessageWithLinks(msg.text)
                   : msg.text}
               </motion.div>
