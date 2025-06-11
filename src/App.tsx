@@ -255,7 +255,7 @@ while (true) {
 
           // Step 3: Get response and audio in one go
           console.log("Getting voice response...");
-          const voiceRes = await fetch(`${FLASK_SERVER_URL}/voice-response`, {
+          const voiceRes = await fetch(`${FLASK_SERVER_URL}/speak`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: userText }),
