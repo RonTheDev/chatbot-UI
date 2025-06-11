@@ -10,13 +10,10 @@ interface Message {
 
 const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com";
 
-const URL_PATTERN = /https?:\/\/\S+/g;
-
+// Cleanly hyperlink visible URLs
 const formatMessageWithLinks = (text: string) => {
-  const urls = text.match(URL_PATTERN) || [];
-  if (urls.length === 0) return text;
-
   const parts = [];
+  const urls = text.match(URL_PATTERN) || [];
   let lastIndex = 0;
 
   urls.forEach((url, i) => {
@@ -30,7 +27,7 @@ const formatMessageWithLinks = (text: string) => {
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-blue-300 underline break-all hover:text-blue-200"
+        className="text-blue-400 underline break-all hover:text-blue-300"
       >
         {url}
       </a>
