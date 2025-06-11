@@ -367,8 +367,6 @@ while (true) {
     waitUntilPlaybackEnds();
   }
 });
-
-          });
         } catch (err) {
           console.error("Voice flow error:", err);
           
