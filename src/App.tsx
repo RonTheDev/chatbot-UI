@@ -11,7 +11,7 @@ interface Message {
 const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com";
 
 // Regex to match URLs
-const URL_PATTERN = /https?:\/\/[^\s]+/g;
+const URL_PATTERN = /https?:\/\/[^\s<>"')\]}]+/g;
 
 const formatMessageWithRawLinks = (text: string) => {
   const parts = text.split(URL_PATTERN);
@@ -21,13 +21,17 @@ const formatMessageWithRawLinks = (text: string) => {
 
   for (let i = 0; i < parts.length; i++) {
     result.push(<span key={`text-${i}`}>{parts[i]}</span>);
+
     if (matches[i]) {
+      // Clean trailing punctuation (like ").", "]", etc)
+      const cleanedUrl = matches[i].replace(/[)\].,!?;:'"}]+$/, "");
+
       result.push(
         <span key={`url-${i}`} className="inline-flex items-center gap-2">
-          <code className="text-blue-300 break-all">{matches[i]}</code>
+          <code className="text-blue-300 break-all">{cleanedUrl}</code>
           <button
             onClick={() => {
-              navigator.clipboard.writeText(matches[i] || "");
+              navigator.clipboard.writeText(cleanedUrl);
             }}
             className="text-sm text-blue-400 border border-blue-400 px-2 py-0.5 rounded hover:bg-blue-700 transition"
             title="העתק קישור"
