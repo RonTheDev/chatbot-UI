@@ -10,37 +10,35 @@ interface Message {
 
 const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com";
 
+// Regex to match URLs
 const URL_PATTERN = /https?:\/\/[^\s]+/g;
-// Cleanly hyperlink visible URLs
+
+// Function to convert plain text URLs into clickable links
 const formatMessageWithLinks = (text: string) => {
-  const parts = [];
-  const urls = text.match(URL_PATTERN) || [];
-  let lastIndex = 0;
+  if (!URL_PATTERN.test(text)) return text;
 
-  urls.forEach((url, i) => {
-    const index = text.indexOf(url, lastIndex);
-    if (index > lastIndex) {
-      parts.push(text.substring(lastIndex, index));
+  const parts = text.split(URL_PATTERN);
+  const matches = text.match(URL_PATTERN) || [];
+
+  const result = [];
+  for (let i = 0; i < parts.length; i++) {
+    result.push(parts[i]);
+    if (matches[i]) {
+      result.push(
+        <a
+          key={i}
+          href={matches[i]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-300 underline break-all hover:text-blue-200"
+        >
+          {matches[i]}
+        </a>
+      );
     }
-    parts.push(
-      <a
-        key={i}
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-blue-400 underline break-all hover:text-blue-300"
-      >
-        {url}
-      </a>
-    );
-    lastIndex = index + url.length;
-  });
-
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex));
   }
 
-  return <>{parts}</>;
+  return <>{result}</>;
 };
 
 export default function Chatbot() {
@@ -129,7 +127,7 @@ const reader = res.body.getReader();
 const decoder = new TextDecoder("utf-8");
 let botText = "";
 
-setMessages((prev) => [...prev, { sender: "bot", text: "" }]); // Placeholder
+setMessages((prev) => [...prev, { sender: "bot", text: "", isStreaming: true }]);
 
 while (true) {
   const { done, value } = await reader.read();
@@ -139,12 +137,12 @@ while (true) {
   botText += chunk;
 
   setMessages((prev) =>
-    prev.map((msg, i) =>
-      i === prev.length - 1 && msg.sender === "bot"
-        ? { ...msg, text: botText }
-        : msg
-    )
-  );
+  prev.map((msg, i) =>
+    i === prev.length - 1 && msg.sender === "bot"
+      ? { ...msg, text: botText, isStreaming: false }
+      : msg
+  )
+);
 }
 
     } catch (err) {
