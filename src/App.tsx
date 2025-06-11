@@ -5,6 +5,7 @@ import "./index.css";
 interface Message {
   sender: "user" | "bot";
   text: string;
+  isStreaming?: boolean; // ✅ ADD THIS LINE
 }
 
 const FLASK_SERVER_URL = "https://flask-voice-server.onrender.com";
