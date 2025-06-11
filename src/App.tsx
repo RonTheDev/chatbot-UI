@@ -351,15 +351,21 @@ while (true) {
           }).finally(() => {
             // Continue the voice loop after playback and a small delay
             if (voiceLoopRef.current) {
-              console.log("Voice loop continuing...");
-              setIsProcessing(false);
-              // Add a small delay before starting the next recording
-              setTimeout(() => {
-                if (voiceLoopRef.current && !audioPlaybackInProgress) {
-                  startVoiceLoop();
-                }
-              }, 800);
-            }
+  console.log("Voice loop will wait for playback before continuing...");
+  
+  // Wait until audioPlaybackInProgress is false before restarting loop
+  const waitUntilPlaybackEnds = () => {
+    if (!audioPlaybackInProgress) {
+      setIsProcessing(false);
+      startVoiceLoop();
+    } else {
+      setTimeout(waitUntilPlaybackEnds, 300); // retry every 300ms
+    }
+  };
+
+  waitUntilPlaybackEnds();
+}
+
           });
         } catch (err) {
           console.error("Voice flow error:", err);
